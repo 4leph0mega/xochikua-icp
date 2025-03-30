@@ -9,18 +9,20 @@ import Buffer "mo:base/Buffer";
 import Int "mo:base/Int";
 
 actor {
+  // Clase que representa una cuenta bancaria
   class Cuenta(Nombre : Text, ContrasenaHash : Text) {
-    var hashContrasena = ContrasenaHash;
-    public var nombre = Nombre;
-    var Balance : Int = 0;
-    var tokens = Buffer.Buffer<Text>(10);
+    var hashContrasena = ContrasenaHash; // Almacena el hash de la contraseña
+    public var nombre = Nombre; // Nombre del titular de la cuenta
+    var Balance : Int = 0; // Saldo de la cuenta
+    var tokens = Buffer.Buffer<Text>(10); // Buffer para almacenar tokens de sesión activos
 
-      private func generarTokenAleatorio() : async Text {
-      let randomBytes = await Random.blob();
+    // Función privada para generar un token aleatorio
+    private func generarTokenAleatorio() : async Text {
+      let randomBytes = await Random.blob(); // Obtener una fuente de aleatoriedad
       var random = Random.Finite(randomBytes);
       var token = "";
 
-      // Convertir a un array para acceso por índice
+      // Lista de caracteres permitidos en el token
       let caracteres = Text.toArray("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
       let longitudCaracteres = caracteres.size();
 
@@ -32,17 +34,14 @@ actor {
             token := token # Char.toText(caracteres[indice]);
           };
           case null {
-            // Si se agota la entropía, solicitar más
-            random := Random.Finite(await Random.blob());
-            
-            // Intentar nuevamente con la nueva entropía
+            random := Random.Finite(await Random.blob()); // Generar más aleatoriedad si es necesario
             switch (random.byte()) {
               case (?b) {
                 let indice = Nat8.toNat(b) % longitudCaracteres;
                 token := token # Char.toText(caracteres[indice]);
               };
               case null {
-                token := token # "A"; // Caso extremo
+                token := token # "A"; // Caso extremo, evitar errores
               };
             };
           };
@@ -52,48 +51,52 @@ actor {
       return token;
     };
 
-    // Método para iniciar sesión (Update porque modifica el estado)
+    // Método para iniciar sesión con una contraseña válida
     public func iniciarSesion(Contrasena : Text) : async Text {
       if (Contrasena == hashContrasena) {
-        let tokenNuevo = await generarTokenAleatorio();  // Llamar a la función para generar el token
-        tokens.add(tokenNuevo);  // Usamos Buffer.add en vez de Array.append
+        let tokenNuevo = await generarTokenAleatorio(); // Generar un nuevo token de sesión
+        tokens.add(tokenNuevo);
         return tokenNuevo;
       } else {
         return "Contraseña Incorrecta";
       }
     };
 
+    // Verificar si un token es válido
     public func TokenValido(Token : Text) : async Bool {
       return Buffer.contains<Text>(tokens, Token, Text.equal);
     };
     
+    // Método para depositar saldo en la cuenta
     public func Depositar(Token : Text, Valor : Int) : async Text {
        if (await TokenValido(Token)) {
-          Balance := Balance + Valor;
+          Balance := Balance + Valor; // Aumentar el saldo
           return "Deposito Exitoso"; 
        } else {
           return "Token Invalido";
        }
      };
 
+    // Método para retirar saldo de la cuenta
     public func Cobrar(Token : Text, Valor : Int) : async Text {
-       let esValido = await TokenValido(Token);
-       if (esValido and Balance > Valor) {
-          Balance := Balance - Valor; 
+       if (await TokenValido(Token) and Balance > Valor) {
+          Balance := Balance - Valor; // Disminuir el saldo
           return "Cobro Exitoso"; 
        } else {
-          return "Ocurrio un Error";
+          return "Ocurrio un Error"; // Error si el saldo es insuficiente o el token no es válido
        }
      };
 
+    // Consultar el saldo de la cuenta
     public func LeerBalance(Token : Text) : async Int { 
        if (await TokenValido(Token)) {
-          return Balance;
+          return Balance; // Retorna el saldo actual
        } else {
-          return -322293;
+          return -322293; // Código de error en caso de token inválido
        }
      };
 
+    // Cerrar sesión eliminando el token de la lista
     public func cerrarSesion(Token : Text) : async Text {
         if (await TokenValido(Token)) {
             let nuevosTokens = Buffer.Buffer<Text>(tokens.size());
@@ -102,7 +105,7 @@ actor {
                     nuevosTokens.add(t);
                 }
             };
-            tokens := nuevosTokens;
+            tokens := nuevosTokens; // Actualiza la lista de tokens
             return "Sesión cerrada";
         } else {
             return "Token inválido";
@@ -110,38 +113,20 @@ actor {
     };
   };
 
-  var cuentas = Buffer.Buffer<Cuenta>(10);
+  var cuentas = Buffer.Buffer<Cuenta>(10); // Lista de cuentas almacenadas en el sistema
 
+  // Método para encontrar una cuenta basada en un token
   public func EncontrarPorToken(Token : Text) : async Nat {
     let cuentasArray = Buffer.toArray(cuentas);
     for (i in Iter.range(0, Array.size(cuentasArray) - 1)) {
         if (await cuentasArray[i].TokenValido(Token)) {
-            return i  // Convert Int to Nat
+            return i;
         };
     };
-    return 0;  // Error value, ensure it returns a Nat
+    return 0; // Si no se encuentra, retorna 0
   };
 
-  public func Deposita(Token : Text, Indice : Nat, Total : Int) : async Text {
-    let cuentasArray = Buffer.toArray(cuentas);
-    return await cuentasArray[Indice].Depositar(Token, Total);
-  };
-
-  public func Cobra(Token : Text, Indice : Nat, Total : Int) : async Text {
-    let cuentasArray = Buffer.toArray(cuentas);
-    return await cuentasArray[Indice].Cobrar(Token, Total);
-  };
-
-  public func ComprobarToken(Token : Text) : async Bool {
-    let cuentasArray = Buffer.toArray(cuentas);
-    for (i in Iter.range(0, Array.size(cuentasArray) - 1)) {
-        if (await cuentasArray[i].TokenValido(Token)) {
-            return true;
-        };
-    };
-    return false;
-  };
-
+  // Función para transferir saldo entre cuentas
   public func Transferencia(TokenDestinatario : Text, TokenRemitente : Text, Monto : Int) : async Text {
     let destinatarioIndex = await EncontrarPorToken(TokenDestinatario);
     let remitenteIndex = await EncontrarPorToken(TokenRemitente);
@@ -159,42 +144,4 @@ actor {
         return "Uno o ambos tokens son Invalidos";
       };
   };
-
-  public func ConseguirBalance(Token : Text, Indice : Nat) : async Int {
-    let cuentasArray = Buffer.toArray(cuentas);
-    return await cuentasArray[Indice].LeerBalance(Token);
-  };
-
-  public func CrearCuenta(Nombre : Text, Contrasena : Text) : async Text {
-  let contrasenaHash = Contrasena;
-  let nuevaCuenta = Cuenta(Nombre, contrasenaHash);
-  cuentas.add(nuevaCuenta); // Añadir la nueva cuenta al Buffer de cuentas
-  
-  let tokenNuevo = await nuevaCuenta.iniciarSesion(Contrasena); // Generar el token de la nueva cuenta
-  return tokenNuevo; // Devolver el token generado
-};
-
-  public func IniciarSesion(Nombre : Text, Contrasena : Text) : async Text {
-  // Recorrer todas las cuentas en el Buffer
-  for (cuenta in cuentas.vals()) {
-    // Verificar si el nombre de la cuenta coincide
-    if (cuenta.nombre == Nombre) {
-      // Intentar iniciar sesión con la contraseña
-      return await cuenta.iniciarSesion(Contrasena);
-    };
-  };
-
-  // Si no se encuentra la cuenta
-  return "Cuenta no encontrada";
-};
-
- public func CerrarSesion(Token : Text) : async Text {
-  let cuentaIndex = await EncontrarPorToken(Token);
-  if (cuentaIndex == 0) {
-    return "Token inválido"; // Si no se encuentra el token
-  };
-  let cuentasArray = Buffer.toArray(cuentas);
-  let cuenta = cuentasArray[cuentaIndex];
-  return await cuenta.cerrarSesion(Token); // Llamar al método
- };
 }

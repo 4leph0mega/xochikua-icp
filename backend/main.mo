@@ -15,6 +15,54 @@ actor {
     var Balance : Int = 0;
     var tokens = Buffer.Buffer<Text>(10);
 
+      private func generarTokenAleatorio() : async Text {
+      let randomBytes = await Random.blob();
+      var random = Random.Finite(randomBytes);
+      var token = "";
+
+      // Convertir a un array para acceso por índice
+      let caracteres = Text.toArray("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
+      let longitudCaracteres = caracteres.size();
+
+      // Generar un token de 32 caracteres
+      for (i in Iter.range(0, 31)) {
+        switch (random.byte()) {
+          case (?b) {
+            let indice = Nat8.toNat(b) % longitudCaracteres;
+            token := token # Char.toText(caracteres[indice]);
+          };
+          case null {
+            // Si se agota la entropía, solicitar más
+            random := Random.Finite(await Random.blob());
+            
+            // Intentar nuevamente con la nueva entropía
+            switch (random.byte()) {
+              case (?b) {
+                let indice = Nat8.toNat(b) % longitudCaracteres;
+                token := token # Char.toText(caracteres[indice]);
+              };
+              case null {
+                token := token # "A"; // Caso extremo
+              };
+            };
+          };
+        };
+      };
+      
+      return token;
+    };
+
+    // Método para iniciar sesión (Update porque modifica el estado)
+    public func iniciarSesion(Contrasena : Text) : async Text {
+      if (Contrasena == hashContrasena) {
+        let tokenNuevo = await generarTokenAleatorio();  // Llamar a la función para generar el token
+        tokens.add(tokenNuevo);  // Usamos Buffer.add en vez de Array.append
+        return tokenNuevo;
+      } else {
+        return "Contraseña Incorrecta";
+      }
+    };
+
     public func TokenValido(Token : Text) : async Bool {
       return Buffer.contains<Text>(tokens, Token, Text.equal);
     };
@@ -68,20 +116,20 @@ actor {
     let cuentasArray = Buffer.toArray(cuentas);
     for (i in Iter.range(0, Array.size(cuentasArray) - 1)) {
         if (await cuentasArray[i].TokenValido(Token)) {
-            return Nat.fromInt(i);  // Convert Int to Nat
+            return i  // Convert Int to Nat
         };
     };
-    return Nat.fromInt(-1);  // Error value, ensure it returns a Nat
+    return 0;  // Error value, ensure it returns a Nat
   };
 
   public func Deposita(Token : Text, Indice : Nat, Total : Int) : async Text {
     let cuentasArray = Buffer.toArray(cuentas);
-    return await cuentasArray[Nat.toInt(Indice)].Depositar(Token, Total);
+    return await cuentasArray[Indice].Depositar(Token, Total);
   };
 
   public func Cobra(Token : Text, Indice : Nat, Total : Int) : async Text {
     let cuentasArray = Buffer.toArray(cuentas);
-    return await cuentasArray[Nat.toInt(Indice)].Cobrar(Token, Total);
+    return await cuentasArray[Indice].Cobrar(Token, Total);
   };
 
   public func ComprobarToken(Token : Text) : async Bool {
@@ -98,7 +146,7 @@ actor {
     let destinatarioIndex = await EncontrarPorToken(TokenDestinatario);
     let remitenteIndex = await EncontrarPorToken(TokenRemitente);
     let DestinatarioValido = await ComprobarToken(TokenDestinatario);
-    let RemitenteValido = await ComprobarToken(TokenRemitente)
+    let RemitenteValido = await ComprobarToken(TokenRemitente);
     
     if (DestinatarioValido and RemitenteValido) {
         let resultadoCobro = await Cobra(TokenRemitente, remitenteIndex, Monto);
@@ -114,6 +162,39 @@ actor {
 
   public func ConseguirBalance(Token : Text, Indice : Nat) : async Int {
     let cuentasArray = Buffer.toArray(cuentas);
-    return await cuentasArray[Nat.toInt(Indice)].LeerBalance(Token);
+    return await cuentasArray[Indice].LeerBalance(Token);
   };
+
+  public func CrearCuenta(Nombre : Text, Contrasena : Text) : async Text {
+  let contrasenaHash = Contrasena;
+  let nuevaCuenta = Cuenta(Nombre, contrasenaHash);
+  cuentas.add(nuevaCuenta); // Añadir la nueva cuenta al Buffer de cuentas
+  
+  let tokenNuevo = await nuevaCuenta.iniciarSesion(Contrasena); // Generar el token de la nueva cuenta
+  return tokenNuevo; // Devolver el token generado
+};
+
+  public func IniciarSesion(Nombre : Text, Contrasena : Text) : async Text {
+  // Recorrer todas las cuentas en el Buffer
+  for (cuenta in cuentas.vals()) {
+    // Verificar si el nombre de la cuenta coincide
+    if (cuenta.nombre == Nombre) {
+      // Intentar iniciar sesión con la contraseña
+      return await cuenta.iniciarSesion(Contrasena);
+    };
+  };
+
+  // Si no se encuentra la cuenta
+  return "Cuenta no encontrada";
+};
+
+ public func CerrarSesion(Token : Text) : async Text {
+  let cuentaIndex = await EncontrarPorToken(Token);
+  if (cuentaIndex == 0) {
+    return "Token inválido"; // Si no se encuentra el token
+  };
+  let cuentasArray = Buffer.toArray(cuentas);
+  let cuenta = cuentasArray[cuentaIndex];
+  return await cuenta.cerrarSesion(Token); // Llamar al método
+ };
 }
